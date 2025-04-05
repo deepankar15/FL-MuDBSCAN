@@ -166,14 +166,23 @@ int populateMulti(DataHdr* dataList, char* argv, int* totalSize, int* dims)
 	return localSize + remote_number;
 }
 
-int main(int argc, char **argv)
+void runDBSCAN(char* inputPath, double epsilon, int minPoints, int minEntries, int maxEntries, char* outputFilePath, int numProcesses) 
 {
 
-	if(argc != 7)
-	{
-		fprintf(stderr, "Usage: ./<output> <InputPath> <Epsilon> <MINPOINTS> <MinEntries> <MaxEntries> <OutputFile>\n");
-        return -1;
-	}
+	int argc = 7;
+	char** argv = new char*[7];
+	argv[0] = "DBSCAN";
+	argv[1] = inputPath;
+	std::string epsilonStr = to_string(epsilon);
+	std::string minPointsStr = to_string(minPoints);
+	std::string minEntriesStr = to_string(minEntries);
+	std::string maxEntriesStr = to_string(maxEntries);
+
+	argv[2] = const_cast<char*>(epsilonStr.c_str());
+	argv[3] = const_cast<char*>(minPointsStr.c_str());
+	argv[4] = const_cast<char*>(minEntriesStr.c_str());
+	argv[5] = const_cast<char*>(maxEntriesStr.c_str());
+	argv[6] = outputFilePath;
 
 	//strcpy(debugFileName,argv[7]);
 	//strcpy(neighbourFileName,argv[8]);
@@ -197,7 +206,7 @@ int main(int argc, char **argv)
 	{
 		if(myrank == proc_of_interest) fprintf(stderr, "\n\nPlease use the number of process cores as a multiple of TWO\n");
 		MPI_Finalize();
-		return 0;
+		return ;
 	}
 
 	struct stat st;
@@ -633,7 +642,7 @@ int main(int argc, char **argv)
 	fclose(output);
 	
 	MPI_Finalize();
-	return 0;
+	return;
 
 }
 

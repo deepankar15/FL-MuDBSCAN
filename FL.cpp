@@ -10,13 +10,6 @@
 
 using namespace libxl;
 
-// DBSCAN function declaration (implemented elsewhere)
-std::vector<std::vector<std::vector<double>>> micro_dbscan(
-    const std::vector<std::vector<double>>& points, 
-    double eps, 
-    int min_pts
-);
-
 struct ClusterDescriptor {
     std::vector<double> centroid;
     int point_count;
@@ -40,8 +33,7 @@ MPI_Datatype create_descriptor_type(int dimensions) {
 }
 
 // Poisson Disk Sampling (Bridson's algorithm)
-std::vector<std::vector<double>> generate_pds(double width, double height, 
-                                            double min_dist, uint32_t seed) {
+std::vector<std::vector<double>> generate_pds(double width, double height, double min_dist, uint32_t seed) {
     std::vector<std::vector<double>> points;
     std::mt19937 gen(seed);
     std::uniform_real_distribution<double> dist(0.0, 1.0);
@@ -128,41 +120,71 @@ std::vector<std::vector<double>> read_excel_data(const std::string& filename) {
 }
 
 // Cluster descriptor generator
-std::vector<ClusterDescriptor> create_descriptors(
-    const std::vector<std::vector<std::vector<double>>>& clusters,
-    const std::vector<std::vector<double>>& pds_points
-) {
+std::vector<ClusterDescriptor> create_descriptors(const std::vector<std::vector<std::vector<double>>>& clusters, const std::vector<std::vector<double>>& pds_points, double epsilon) 
+{
     std::vector<ClusterDescriptor> descriptors;
     
+    // For each cluster
     for(const auto& cluster : clusters) {
-        ClusterDescriptor desc;
-        desc.point_count = cluster.size();
+        std::vector<std::vector<double>> nearby_points; // Points from pds_points that are within epsilon of any point in the cluster
         
-        // Calculate centroid
-        std::vector<double> centroid(pds_points[0].size(), 0.0);
-        for(const auto& point : cluster) {
-            for(size_t i=0; i<point.size(); ++i) {
-                centroid[i] += point[i];
+        // Check each pds point for proximity to any point in the current cluster
+        for (const auto& pds_pt : pds_points) {
+            bool is_near = false;
+            // For each point in the cluster, check the distance
+            for (const auto& cluster_pt : cluster) {
+                double dist_sq = 0.0;
+                for (size_t i = 0; i < pds_pt.size(); ++i) {
+                    double diff = pds_pt[i] - cluster_pt[i];
+                    dist_sq += diff * diff;
+                }
+                if (std::sqrt(dist_sq) <= epsilon) {
+                    is_near = true;
+                    break;
+                }
+            }
+            if (is_near) {
+                nearby_points.push_back(pds_pt);
             }
         }
-        for(auto& val : centroid) val /= cluster.size();
+        
+        // If no pds points are close to the cluster, skip descriptor calculation (or handle it as needed)
+        if (nearby_points.empty())
+            continue;
+        
+        ClusterDescriptor desc;
+        desc.point_count = nearby_points.size();
+        
+        // Calculate centroid
+        std::vector<double> centroid(nearby_points[0].size(), 0.0);
+        for(const auto& pt : nearby_points) {
+            for(size_t i = 0; i < pt.size(); ++i) {
+                centroid[i] += pt[i];
+            }
+        }
+        for(auto& val : centroid) {
+            val /= nearby_points.size();
+        }
         desc.centroid = centroid;
         
-        // Calculate max radius
+        // Calculate max radius from centroid
         double max_radius = 0.0;
-        for(const auto& point : cluster) {
-            double dist = 0.0;
-            for(size_t i=0; i<point.size(); ++i) {
-                dist += pow(point[i] - centroid[i], 2);
+        for(const auto& pt : nearby_points) {
+            double dist_sq = 0.0;
+            for (size_t i = 0; i < pt.size(); ++i) {
+                double diff = pt[i] - centroid[i];
+                dist_sq += diff * diff;
             }
-            max_radius = std::max(max_radius, sqrt(dist));
+            max_radius = std::max(max_radius, std::sqrt(dist_sq));
         }
         desc.max_radius = max_radius;
         
         descriptors.push_back(desc);
     }
+    
     return descriptors;
 }
+
 
 int main(int argc, char** argv) {
     MPI_Init(&argc, &argv);
@@ -234,7 +256,7 @@ int main(int argc, char** argv) {
             auto clusters = micro_dbscan(local_data, EPS, MIN_PTS);
             
             // Create descriptors
-            auto descriptors = create_descriptors(clusters, pds_points);
+            auto descriptors = create_descriptors(clusters, pds_points, PDS_MIN_DIST/2);
             
             // Send to server
             int count = descriptors.size();
